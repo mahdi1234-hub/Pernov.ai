@@ -132,6 +132,7 @@ export default function ChatPage() {
     if (type.includes("word") || type.includes("docx")) return "DOC";
     if (type.includes("sheet") || type.includes("csv") || type.includes("xlsx")) return "XLS";
     if (type.includes("image")) return "IMG";
+    if (type.includes("video") || type.includes("mp4")) return "VID";
     if (type.includes("json")) return "JSON";
     return "FILE";
   };
@@ -267,7 +268,7 @@ export default function ChatPage() {
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
               )}
             </button>
-            <input ref={fileInputRef} type="file" multiple onChange={(e) => e.target.files && handleFileUpload(e.target.files)} className="hidden" accept=".pdf,.docx,.doc,.csv,.xlsx,.xls,.json,.txt,.md,.xml,.html,.py,.js,.ts,.java,.c,.cpp,.css,.sql,.yaml,.yml,.png,.jpg,.jpeg,.gif,.webp,.svg" />
+            <input ref={fileInputRef} type="file" multiple onChange={(e) => e.target.files && handleFileUpload(e.target.files)} className="hidden" accept=".pdf,.docx,.doc,.csv,.xlsx,.xls,.json,.txt,.md,.xml,.html,.py,.js,.ts,.java,.c,.cpp,.css,.sql,.yaml,.yml,.png,.jpg,.jpeg,.gif,.webp,.svg,.mp4,.avi,.mov,.mkv,.webm,.flv,.wmv" />
             <textarea ref={inputRef} value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={handleKeyDown} placeholder="Ask anything, upload files, or request charts..." rows={1} className="flex-1 bg-transparent text-white text-sm font-light placeholder-white/30 outline-none resize-none max-h-32" style={{ lineHeight: "1.6" }} disabled={isStreaming} />
             <button onClick={sendMessage} disabled={!input.trim() || isStreaming} className="text-white/40 hover:text-white disabled:opacity-30 transition-all duration-300 pb-0.5">
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M5 12h14M12 5l7 7-7 7" /></svg>
