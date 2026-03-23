@@ -1,5 +1,6 @@
 import Groq from "groq-sdk";
 import { NextRequest } from "next/server";
+import { currentUser } from "@clerk/nextjs/server";
 
 const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY,
@@ -10,6 +11,30 @@ interface ChatMessage {
   content: string;
 }
 
+interface UserIdentity {
+  id: string;
+  email: string;
+  firstName: string | null;
+  lastName: string | null;
+  fullName: string;
+}
+
+async function getAuthenticatedUser(): Promise<UserIdentity | null> {
+  try {
+    const user = await currentUser();
+    if (!user) return null;
+    return {
+      id: user.id,
+      email: user.emailAddresses[0]?.emailAddress || "",
+      firstName: user.firstName,
+      lastName: user.lastName,
+      fullName: `${user.firstName || ""} ${user.lastName || ""}`.trim(),
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const { messages, fileContext } = (await request.json()) as {
@@ -17,7 +42,17 @@ export async function POST(request: NextRequest) {
       fileContext?: string;
     };
 
-    const systemContent = `You are NOVERA AI, a refined and sophisticated assistant specializing in data analysis, visualization, and report generation. You communicate with elegance and precision.
+    // Authentication Tool: Get user identity
+    const authenticatedUser = await getAuthenticatedUser();
+    const userContext = authenticatedUser
+      ? `\n\nAUTHENTICATED USER (via Authentication Tool):
+- User ID: ${authenticatedUser.id}
+- Name: ${authenticatedUser.fullName || "Not provided"}
+- Email: ${authenticatedUser.email}
+You MUST acknowledge the user by their name when greeting them. Personalize responses based on who they are.`
+      : "";
+
+    const systemContent = `You are NOVERA AI, a refined and sophisticated assistant specializing in data analysis, visualization, and report generation. You communicate with elegance and precision.${userContext}
 
 CAPABILITIES:
 1. **File Analysis**: You can read and analyze uploaded files (PDF, DOCX, CSV, XLSX, TXT, JSON, images, code files, etc.)

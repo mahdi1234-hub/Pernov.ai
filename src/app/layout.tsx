@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { DM_Sans, Inter } from "next/font/google";
+import { ClerkProvider } from "@clerk/nextjs";
 import "./globals.css";
 
 const dmSans = DM_Sans({
@@ -25,13 +26,24 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      lang="en"
-      className={`${dmSans.variable} ${inter.variable} h-full scroll-smooth`}
+    <ClerkProvider
+      appearance={{
+        variables: {
+          colorPrimary: "#6366f1",
+          colorBackground: "#1a1a2e",
+          colorInputBackground: "#16162a",
+          colorInputText: "#ffffff",
+        },
+      }}
     >
-      <body className="min-h-full flex flex-col font-light antialiased">
-        {children}
-      </body>
-    </html>
+      <html
+        lang="en"
+        className={`${dmSans.variable} ${inter.variable} h-full scroll-smooth`}
+      >
+        <body className="min-h-full flex flex-col font-light antialiased">
+          {children}
+        </body>
+      </html>
+    </ClerkProvider>
   );
 }
