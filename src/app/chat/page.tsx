@@ -5,9 +5,30 @@ import { useRouter } from "next/navigation";
 import { NivoChart, NivoDashboard } from "@/components/NivoCharts";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import { PdfPreview, useReportGenerator } from "@/components/PdfGenerator";
+import {
+  SourcesGrid,
+  ImageGrid,
+  SearchSkeleton,
+} from "@/components/SearchResults";
+import type {
+  SearchSource,
+  SearchImage,
+  UnsplashImage,
+} from "@/components/SearchResults";
 
 interface FileAttachment { name: string; type: string; content: string; size: number; }
-interface Message { id: string; role: "user" | "assistant"; content: string; files?: FileAttachment[]; }
+interface Message {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  files?: FileAttachment[];
+  isSearch?: boolean;
+  searchData?: {
+    sources: SearchSource[];
+    imageResults: SearchImage[];
+    unsplashImages: UnsplashImage[];
+  };
+}
 /* eslint-disable @typescript-eslint/no-explicit-any */
 interface ChartData { type: string; title?: string; data: any[]; keys?: string[]; indexBy?: string; }
 interface DashboardData { title: string; charts: ChartData[]; }
@@ -44,6 +65,8 @@ export default function ChatPage() {
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null);
   const [pdfPreviewTitle, setPdfPreviewTitle] = useState("");
   const [dragOver, setDragOver] = useState(false);
+  const [searchMode, setSearchMode] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -86,8 +109,122 @@ export default function ChatPage() {
     await handleGenerateReport(reportData);
   };
 
+  /* ─── Web Search Handler ─── */
+  const sendSearch = async () => {
+    if (!input.trim() || isStreaming) return;
+    const query = input.trim();
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      role: "user",
+      content: query,
+      isSearch: true,
+    };
+    const updatedMessages = [...messages, userMessage];
+    setMessages(updatedMessages);
+    setInput("");
+    setIsStreaming(true);
+    setIsSearching(true);
+
+    const assistantMessage: Message = {
+      id: (Date.now() + 1).toString(),
+      role: "assistant",
+      content: "",
+      isSearch: true,
+      searchData: { sources: [], imageResults: [], unsplashImages: [] },
+    };
+    setMessages((prev) => [...prev, assistantMessage]);
+
+    try {
+      const previousMessages = updatedMessages
+        .filter((m) => m.role === "assistant" && m.content)
+        .slice(-4)
+        .map((m) => ({ role: m.role, content: m.content }));
+
+      const response = await fetch("/api/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query, messages: previousMessages }),
+      });
+
+      if (!response.ok) throw new Error("Search failed");
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      if (!reader) throw new Error("No response stream");
+
+      let accumulatedContent = "";
+      let searchData: Message["searchData"] = {
+        sources: [],
+        imageResults: [],
+        unsplashImages: [],
+      };
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value);
+        const lines = chunk.split("\n");
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            const dataStr = line.slice(6).trim();
+            if (dataStr === "[DONE]") break;
+            try {
+              const parsed = JSON.parse(dataStr);
+              if (parsed.type === "sources") {
+                searchData = {
+                  sources: parsed.sources || [],
+                  imageResults: parsed.imageResults || [],
+                  unsplashImages: parsed.unsplashImages || [],
+                };
+                setIsSearching(false);
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === assistantMessage.id
+                      ? { ...m, searchData }
+                      : m
+                  )
+                );
+              } else if (parsed.type === "content" && parsed.content) {
+                accumulatedContent += parsed.content;
+                const currentContent = accumulatedContent;
+                const currentSearchData = searchData;
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === assistantMessage.id
+                      ? { ...m, content: currentContent, searchData: currentSearchData }
+                      : m
+                  )
+                );
+              }
+            } catch {
+              /* skip parse errors */
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Search error:", error);
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === assistantMessage.id
+            ? { ...m, content: "I apologize, but the search encountered an error. Please try again." }
+            : m
+        )
+      );
+    } finally {
+      setIsStreaming(false);
+      setIsSearching(false);
+    }
+  };
+
+  /* ─── Regular Chat Handler ─── */
   const sendMessage = async () => {
     if (!input.trim() || isStreaming) return;
+
+    if (searchMode) {
+      return sendSearch();
+    }
+
     const userMessage: Message = { id: Date.now().toString(), role: "user", content: input.trim(), files: files.length > 0 ? [...files] : undefined };
     const updatedMessages = [...messages, userMessage];
     setMessages(updatedMessages);
@@ -175,10 +312,39 @@ export default function ChatPage() {
             <div className="flex flex-col items-center justify-center h-full min-h-[50vh] text-center">
               <div className="space-y-6">
                 <h3 className="text-white/80 text-2xl md:text-3xl font-light" style={{ fontFamily: "var(--font-dm-sans), 'DM Sans', sans-serif", letterSpacing: "-0.03em" }}>How may I assist you?</h3>
-                <p className="text-white/40 text-sm font-light max-w-md">Upload files, ask for data analysis, generate charts, create dashboards, or build professional PDF reports.</p>
+                <p className="text-white/40 text-sm font-light max-w-md">Upload files, ask for data analysis, generate charts, create dashboards, build professional PDF reports, or search the web.</p>
                 <div className="flex flex-wrap justify-center gap-3 mt-8">
-                  {["Analyze my uploaded file", "Generate a sales dashboard", "Create a solar energy report", "Show me a pie chart"].map((suggestion) => (
-                    <button key={suggestion} onClick={() => { setInput(suggestion); inputRef.current?.focus(); }} className="text-[10px] uppercase tracking-widest text-white/40 border border-white/15 px-4 py-2 rounded-[2px] hover:text-white/80 hover:border-white/30 transition-all duration-300">{suggestion}</button>
+                  {[
+                    { text: "Search: Latest AI news", isSearch: true },
+                    { text: "Analyze my uploaded file", isSearch: false },
+                    { text: "Generate a sales dashboard", isSearch: false },
+                    { text: "Search: Solar energy trends 2025", isSearch: true },
+                  ].map((suggestion) => (
+                    <button
+                      key={suggestion.text}
+                      onClick={() => {
+                        if (suggestion.isSearch) {
+                          setSearchMode(true);
+                          setInput(suggestion.text.replace("Search: ", ""));
+                        } else {
+                          setSearchMode(false);
+                          setInput(suggestion.text);
+                        }
+                        inputRef.current?.focus();
+                      }}
+                      className={`text-[10px] uppercase tracking-widest border px-4 py-2 rounded-[2px] transition-all duration-300 ${
+                        suggestion.isSearch
+                          ? "text-indigo-300/60 border-indigo-400/20 hover:text-indigo-300 hover:border-indigo-400/40"
+                          : "text-white/40 border-white/15 hover:text-white/80 hover:border-white/30"
+                      }`}
+                    >
+                      {suggestion.isSearch && (
+                        <svg className="w-3 h-3 inline mr-1.5 -mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                        </svg>
+                      )}
+                      {suggestion.text}
+                    </button>
                   ))}
                 </div>
               </div>
@@ -188,7 +354,23 @@ export default function ChatPage() {
           {messages.map((message) => (
             <div key={message.id} className={`message-in flex ${message.role === "user" ? "justify-end" : "justify-start"}`}>
               <div className={`max-w-[85%] md:max-w-[80%] ${message.role === "user" ? "bg-white/15 backdrop-blur-md border border-white/20 text-white" : "bg-white/5 backdrop-blur-md border border-white/10 text-white/90"} px-5 py-4 rounded-lg`}>
-                {message.role === "assistant" && (<span className="block text-[9px] uppercase tracking-widest text-white/30 mb-2" style={{ letterSpacing: "0.15em" }}>NOVERA</span>)}
+                {/* User message with search badge */}
+                {message.role === "user" && message.isSearch && (
+                  <span className="inline-flex items-center gap-1 text-[9px] uppercase tracking-widest text-indigo-300/70 mb-2 bg-indigo-400/10 px-2 py-0.5 rounded">
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                    Web Search
+                  </span>
+                )}
+
+                {message.role === "assistant" && (
+                  <span className="block text-[9px] uppercase tracking-widest text-white/30 mb-2" style={{ letterSpacing: "0.15em" }}>
+                    {message.isSearch ? "NOVERA SEARCH" : "NOVERA"}
+                  </span>
+                )}
+
+                {/* File attachments */}
                 {message.files && message.files.length > 0 && (
                   <div className="flex flex-wrap gap-2 mb-3">
                     {message.files.map((file, idx) => (
@@ -199,7 +381,51 @@ export default function ChatPage() {
                     ))}
                   </div>
                 )}
-                {message.role === "assistant" && message.content ? (
+
+                {/* Search results: sources + images + AI answer */}
+                {message.role === "assistant" && message.isSearch ? (
+                  <div>
+                    {/* Show search loading skeleton */}
+                    {isSearching && message.id === messages[messages.length - 1]?.id && (
+                      <SearchSkeleton />
+                    )}
+
+                    {/* Sources grid */}
+                    {message.searchData && message.searchData.sources.length > 0 && (
+                      <SourcesGrid sources={message.searchData.sources} isLoading={false} />
+                    )}
+
+                    {/* Images */}
+                    {message.searchData && (message.searchData.imageResults.length > 0 || message.searchData.unsplashImages.length > 0) && (
+                      <ImageGrid
+                        images={message.searchData.imageResults}
+                        unsplashImages={message.searchData.unsplashImages}
+                        isLoading={false}
+                      />
+                    )}
+
+                    {/* AI Answer */}
+                    {message.content ? (
+                      <div>
+                        <div className="flex items-center gap-2 mb-2">
+                          <svg className="w-4 h-4 text-indigo-400/70" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                          </svg>
+                          <span className="text-[10px] uppercase tracking-widest text-white/40 font-medium">Answer</span>
+                        </div>
+                        <MarkdownRenderer content={message.content} />
+                      </div>
+                    ) : (
+                      !isSearching && (
+                        <span className="inline-flex gap-1 ml-1">
+                          <span className="typing-dot w-1.5 h-1.5 bg-white/60 rounded-full inline-block" />
+                          <span className="typing-dot w-1.5 h-1.5 bg-white/60 rounded-full inline-block" />
+                          <span className="typing-dot w-1.5 h-1.5 bg-white/60 rounded-full inline-block" />
+                        </span>
+                      )
+                    )}
+                  </div>
+                ) : message.role === "assistant" && message.content ? (
                   <div>
                     {parseContentBlocks(message.content).map((block, idx) => {
                       if (block.type === "chart" && block.data) return <NivoChart key={idx} chart={block.data as ChartData} />;
@@ -260,17 +486,62 @@ export default function ChatPage() {
 
       <div className="relative z-10 px-4 md:px-8 py-4 border-t border-white/10">
         <div className="max-w-4xl mx-auto">
-          <div className="flex items-end gap-3 bg-white/10 backdrop-blur-md border border-white/20 rounded-lg px-5 py-3">
-            <button onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="text-white/40 hover:text-white/80 transition-colors duration-300 pb-0.5" title="Attach files">
-              {isUploading ? (
-                <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" /></svg>
-              ) : (
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
-              )}
+          {/* Search mode toggle */}
+          <div className="flex items-center gap-2 mb-2">
+            <button
+              onClick={() => setSearchMode(!searchMode)}
+              className={`flex items-center gap-1.5 text-[10px] uppercase tracking-widest px-3 py-1.5 rounded-full border transition-all duration-300 ${
+                searchMode
+                  ? "bg-indigo-500/20 border-indigo-400/40 text-indigo-300"
+                  : "bg-transparent border-white/15 text-white/40 hover:text-white/60 hover:border-white/25"
+              }`}
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              {searchMode ? "Search Mode ON" : "Search the Web"}
             </button>
+            {searchMode && (
+              <span className="text-[9px] text-indigo-300/50 tracking-wider">
+                Powered by Firecrawl + Groq
+              </span>
+            )}
+          </div>
+
+          <div className={`flex items-end gap-3 backdrop-blur-md border rounded-lg px-5 py-3 transition-all duration-300 ${
+            searchMode
+              ? "bg-indigo-500/5 border-indigo-400/20"
+              : "bg-white/10 border-white/20"
+          }`}>
+            {!searchMode && (
+              <button onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="text-white/40 hover:text-white/80 transition-colors duration-300 pb-0.5" title="Attach files">
+                {isUploading ? (
+                  <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" /></svg>
+                ) : (
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
+                )}
+              </button>
+            )}
+            {searchMode && (
+              <div className="text-indigo-400/60 pb-0.5">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+              </div>
+            )}
             <input ref={fileInputRef} type="file" multiple onChange={(e) => e.target.files && handleFileUpload(e.target.files)} className="hidden" accept=".pdf,.docx,.doc,.csv,.xlsx,.xls,.json,.txt,.md,.xml,.html,.py,.js,.ts,.java,.c,.cpp,.css,.sql,.yaml,.yml,.png,.jpg,.jpeg,.gif,.webp,.svg,.mp4,.avi,.mov,.mkv,.webm,.flv,.wmv" />
-            <textarea ref={inputRef} value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={handleKeyDown} placeholder="Ask anything, upload files, or request charts..." rows={1} className="flex-1 bg-transparent text-white text-sm font-light placeholder-white/30 outline-none resize-none max-h-32" style={{ lineHeight: "1.6" }} disabled={isStreaming} />
-            <button onClick={sendMessage} disabled={!input.trim() || isStreaming} className="text-white/40 hover:text-white disabled:opacity-30 transition-all duration-300 pb-0.5">
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder={searchMode ? "Search the web for anything..." : "Ask anything, upload files, or request charts..."}
+              rows={1}
+              className="flex-1 bg-transparent text-white text-sm font-light placeholder-white/30 outline-none resize-none max-h-32"
+              style={{ lineHeight: "1.6" }}
+              disabled={isStreaming}
+            />
+            <button onClick={sendMessage} disabled={!input.trim() || isStreaming} className={`disabled:opacity-30 transition-all duration-300 pb-0.5 ${searchMode ? "text-indigo-400/60 hover:text-indigo-300" : "text-white/40 hover:text-white"}`}>
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M5 12h14M12 5l7 7-7 7" /></svg>
             </button>
           </div>
