@@ -2,6 +2,9 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import { useUser, UserButton } from "@clerk/nextjs";
+import ChatAuthGate from "@/components/ChatAuthGate";
+import type { AuthenticatedUser } from "@/components/ChatAuthGate";
 import { NivoChart, NivoDashboard } from "@/components/NivoCharts";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import { PdfPreview, useReportGenerator } from "@/components/PdfGenerator";
@@ -67,11 +70,17 @@ export default function ChatPage() {
   const [dragOver, setDragOver] = useState(false);
   const [searchMode, setSearchMode] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
+  const [authUser, setAuthUser] = useState<AuthenticatedUser | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
   const { generateReport } = useReportGenerator();
+  const { isSignedIn, user } = useUser();
+
+  const handleAuthenticated = useCallback((u: AuthenticatedUser) => {
+    setAuthUser(u);
+  }, []);
 
   const scrollToBottom = useCallback(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, []);
   useEffect(() => { scrollToBottom(); }, [messages, scrollToBottom]);
@@ -301,17 +310,34 @@ export default function ChatPage() {
           <h2 className="text-white text-sm font-light tracking-widest uppercase" style={{ fontFamily: "var(--font-dm-sans), 'DM Sans', sans-serif", letterSpacing: "0.2em" }}>NOVERA</h2>
           <p className="text-white/40 text-[10px] uppercase tracking-widest mt-1">AI Assistant</p>
         </div>
-        <button onClick={() => { setMessages([]); setFiles([]); }} className="text-white/60 hover:text-white transition-colors duration-300">
-          <span className="text-[10px] uppercase tracking-widest font-medium">Clear</span>
-        </button>
+        <div className="flex items-center gap-3">
+          {isSignedIn && user && (
+            <div className="flex items-center gap-2">
+              <span className="text-white/50 text-[10px] uppercase tracking-widest hidden md:inline">
+                {user.firstName || user.primaryEmailAddress?.emailAddress}
+              </span>
+              <UserButton
+                appearance={{
+                  elements: {
+                    avatarBox: "w-7 h-7 border border-white/20",
+                  },
+                }}
+              />
+            </div>
+          )}
+          <button onClick={() => { setMessages([]); setFiles([]); }} className="text-white/60 hover:text-white transition-colors duration-300">
+            <span className="text-[10px] uppercase tracking-widest font-medium">Clear</span>
+          </button>
+        </div>
       </div>
 
       <div className="relative z-10 flex-1 overflow-y-auto chat-scroll px-4 md:px-8 py-6">
+        <ChatAuthGate onAuthenticated={handleAuthenticated}>
         <div className="max-w-4xl mx-auto space-y-6">
           {messages.length === 0 && (
             <div className="flex flex-col items-center justify-center h-full min-h-[50vh] text-center">
               <div className="space-y-6">
-                <h3 className="text-white/80 text-2xl md:text-3xl font-light" style={{ fontFamily: "var(--font-dm-sans), 'DM Sans', sans-serif", letterSpacing: "-0.03em" }}>How may I assist you?</h3>
+                <h3 className="text-white/80 text-2xl md:text-3xl font-light" style={{ fontFamily: "var(--font-dm-sans), 'DM Sans', sans-serif", letterSpacing: "-0.03em" }}>{authUser ? `Welcome, ${authUser.firstName || 'User'}. How may I assist you?` : 'How may I assist you?'}</h3>
                 <p className="text-white/40 text-sm font-light max-w-md">Upload files, ask for data analysis, generate charts, create dashboards, build professional PDF reports, or search the web.</p>
                 <div className="flex flex-wrap justify-center gap-3 mt-8">
                   {[
@@ -463,6 +489,7 @@ export default function ChatPage() {
           ))}
           <div ref={messagesEndRef} />
         </div>
+        </ChatAuthGate>
       </div>
 
       {files.length > 0 && (
