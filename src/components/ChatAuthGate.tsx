@@ -1,7 +1,7 @@
 "use client";
 
 import { useUser, SignIn, SignUp } from "@clerk/nextjs";
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 
 export interface AuthenticatedUser {
   id: string;
@@ -20,17 +20,21 @@ export default function ChatAuthGate({ children, onAuthenticated }: ChatAuthGate
   const { isSignedIn, user, isLoaded } = useUser();
   const [authMode, setAuthMode] = useState<"sign-in" | "sign-up">("sign-up");
   const [showAuth, setShowAuth] = useState(false);
+  const hasNotified = useRef(false);
 
-  // Once authenticated, pass user info up
-  if (isLoaded && isSignedIn && user && onAuthenticated) {
-    onAuthenticated({
-      id: user.id,
-      email: user.primaryEmailAddress?.emailAddress || "",
-      firstName: user.firstName,
-      lastName: user.lastName,
-      imageUrl: user.imageUrl,
-    });
-  }
+  // Once authenticated, pass user info up (in useEffect to avoid render-loop)
+  useEffect(() => {
+    if (isLoaded && isSignedIn && user && onAuthenticated && !hasNotified.current) {
+      hasNotified.current = true;
+      onAuthenticated({
+        id: user.id,
+        email: user.primaryEmailAddress?.emailAddress || "",
+        firstName: user.firstName,
+        lastName: user.lastName,
+        imageUrl: user.imageUrl,
+      });
+    }
+  }, [isLoaded, isSignedIn, user, onAuthenticated]);
 
   if (!isLoaded) {
     return (
